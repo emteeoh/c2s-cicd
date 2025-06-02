@@ -1,0 +1,71 @@
+name: Build and Test
+
+on:
+  workflow_call:
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version_file: ${{ steps.version_out.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install ImageMagick (only under act)
+        if: env.ACT == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          java-version: 21
+          distribution: 'oracle'
+          cache: 'gradle'
+
+      - name: Use Gradle cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.gradle/caches
+          key: ${{ runner.os }}-gradle-${{ hashFiles('build.gradle') }}
+
+      - name: Update Version Number
+        id: version_out
+        run: |
+          VERSION=$(echo "${{ github.sha }}" | cut -c1-7).$(date +%Y-%m-%d).${{ github.run_number }}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "$VERSION" > version.txt
+
+      - name: Run Gradle Build
+        run: ./gradlew build --no-daemon --console=plain --info -Pversion=${{ steps.version_out.outputs.version }}
+
+      - name: Run Unit Tests and Generate Coverage
+        run: ./gradlew test jacocoTestReport
+
+      - name: Upload test reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-test-reports
+          path: '**/build/reports/tests/**/index.html'
+
+      - name: Upload Version File
+        uses: actions/upload-artifact@v4
+        with:
+          name: version-file
+          path: version.txt
+
+      - name: Upload build outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-outputs
+          path: '**/build/classes/**'
+
+      - name: Upload JaCoCo coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: '**/build/reports/jacoco/test/jacocoTestReport.xml'
+

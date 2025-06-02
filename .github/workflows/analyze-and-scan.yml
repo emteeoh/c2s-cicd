@@ -1,0 +1,121 @@
+# .github/workflows/analyze-and-scan.yml
+name: Analyze and Scan
+
+on:
+  workflow_call:
+    secrets:
+      GITHUB_TOKEN:
+        required: true
+      SONAR_SCANNER_LOGIN:
+        required: true
+      NVD_API_KEY:
+        required: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          java-version: 21
+          distribution: 'oracle'
+          cache: 'gradle'
+
+      - name: Use Gradle cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.gradle/caches
+          key: ${{ runner.os }}-gradle-${{ hashFiles('build.gradle') }}
+
+      - name: Download build outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: build-outputs
+
+      - name: Download coverage reports
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-reports
+
+      - name: Download test reports
+        uses: actions/download-artifact@v4
+        with:
+          name: all-test-reports
+
+      - name: Download version file
+        uses: actions/download-artifact@v4
+        with:
+          name: version-file
+
+      - name: Get Date for Cache Key
+        id: get-date
+        run: |
+          echo "datetime=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+      - name: Ensure OWASP NVD Cache Path Exists
+        run: mkdir -p ${{ github.workspace }}/owasp-cache
+
+      - name: Restore OWASP NVD Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/owasp-cache
+          key: owasp-nvd-data-linux
+          restore-keys: |
+            owasp-nvd-data-linux
+
+      - name: Run OWASP Dependency Check
+        if: ${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/ITO-73' }} # remove ITO-73 when next updating CICD actions.
+        run: |
+          export NVD_API_KEY="${NVD_API_KEY}"
+          export DEPENDENCY_CHECK_DATA_DIR="${DEPENDENCY_CHECK_DATA_DIR}"
+          ./gradlew dependencyCheckAggregate info | tee gradle-dependency-check.log
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+          DEPENDENCY_CHECK_DATA_DIR: ${{ github.workspace }}/owasp-cache
+
+      - name: Upload Dependency Check Log
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-log
+          path: gradle-dependency-check.log
+
+      - name: Save OWASP NVD Cache
+        uses: actions/cache/save@v4
+        if: success() || failure() # Save even if the build fails, to capture potential updates
+        with:
+          path: ${{ github.workspace }}/owasp-cache
+          key: owasp-nvd-data-linux
+
+      - name: Generate sonar-project.properties
+        run: bash buildSonarProperties.sh
+
+      - name: Run SonarQube Analysis
+        uses: SonarSource/sonarqube-scan-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_SCANNER_LOGIN }}
+          SONAR_HOST_URL: https://sonarqube.cloud2software.com
+          SONAR_SCANNER_OPTS: "-Dhttp.socket.timeout=600000 -Dhttp.connection.timeout=600000"
+        with:
+          args: >
+            -Dsonar.projectKey=DAM-Multiproject
+            -Dsonar.projectName=DAM-Multiproject
+            -Dsonar.branch.name=${{ github.ref_name }}
+            -Dsonar.coverage.jacoco.xmlReportPaths=**/jacocoTestReport.xml
+
+      - name: upload Sonar properties file
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonar-project.properties
+          path: sonar-project.properties
+
+      - name: Upload OWASP Dependency Check HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report
+          path: '**/build/reports/dependency-check-report.html'
+
+
