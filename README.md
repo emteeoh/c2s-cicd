@@ -6,7 +6,7 @@
 git commit  
 git tag -f v1    # -f forces tag to be moved  
 git push  
-git push origin --force v1  #move the tag upstream to this commit
+git push origin -f v1  #move the tag upstream to this commit
 
 
 ## plan:
