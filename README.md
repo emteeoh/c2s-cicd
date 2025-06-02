@@ -2,7 +2,7 @@
 # cheatsheet:
 
 ## to modify a tag:
-`<edit code>`
+`<edit code>`  
 git commit  
 git tag -f v1    # -f forces tag to be moved  
 git push  
